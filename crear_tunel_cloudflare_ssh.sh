@@ -69,14 +69,14 @@ if [ -f "$CERT_FILE" ]; then
         BACKUP_NAME="$CERT_FILE.backup.$(date +%s)"
         echo "[*] Moviendo $CERT_FILE a $BACKUP_NAME"
         mv "$CERT_FILE" "$BACKUP_NAME"
-        echo "[*] Ejecutando cloudflared tunnel login..."
-        cloudflared tunnel login
+        echo "[*] Ejecutando cloudflared tunnel login con QR..."
+        cloudflared tunnel login --qr
     else
         echo "[*] Usando el archivo existente."
     fi
 else
-    echo "[*] Ejecutando cloudflared tunnel login..."
-    cloudflared tunnel login
+    echo "[*] Ejecutando cloudflared tunnel login con QR..."
+    cloudflared tunnel login --qr
 fi
 
 # 3. Pedir datos
