@@ -5,7 +5,7 @@ set -e
 echo "=== 🌐 Creación automática de Cloudflare Tunnel para SSH ==="
 
 # 0. Validar dependencias críticas antes de hacer cualquier cosa
-DEPENDENCIAS=(jq wget dpkg)
+DEPENDENCIAS=(jq wget)
 
 echo "[*] Validando dependencias del sistema..."
 for cmd in "${DEPENDENCIAS[@]}"; do
@@ -17,9 +17,9 @@ for cmd in "${DEPENDENCIAS[@]}"; do
     fi
 done
 
-# Validar arquitectura antes de instalar cloudflared
+# 1. Instalar cloudflared según arquitectura
 if ! command -v cloudflared &>/dev/null; then
-    echo "[+] Instalando cloudflared (Linux amd64)..."
+    echo "[+] Instalando cloudflared..."
 
     ARCH=$(uname -m)
     OS=$(uname -s)
@@ -29,31 +29,38 @@ if ! command -v cloudflared &>/dev/null; then
         exit 1
     fi
 
-    if [[ "$ARCH" != "x86_64" ]]; then
-        echo "❌ Este instalador solo soporta arquitectura amd64 (x86_64)."
-        echo "    Tu arquitectura detectada es: $ARCH"
+    case "$ARCH" in
+        x86_64)
+            BIN_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
+            ;;
+        aarch64)
+            BIN_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64"
+            ;;
+        armv7l)
+            BIN_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm"
+            ;;
+        *)
+            echo "❌ Arquitectura no soportada automáticamente: $ARCH"
+            echo "Descarga manual desde:"
+            echo "https://github.com/cloudflare/cloudflared/releases"
+            exit 1
+            ;;
+    esac
+
+    echo "[*] Descargando cloudflared para $ARCH..."
+    wget -q --show-progress -O cloudflared "$BIN_URL"
+    chmod +x cloudflared
+    sudo mv cloudflared /usr/local/bin/cloudflared
+
+    if ! command -v cloudflared &>/dev/null; then
+        echo "❌ cloudflared no se instaló correctamente."
         exit 1
     fi
 
-    TEMP_DEB="cloudflared-linux-amd64.deb"
-    wget -q --show-progress https://github.com/cloudflare/cloudflared/releases/latest/download/$TEMP_DEB
-
-    if [ ! -f "$TEMP_DEB" ]; then
-        echo "❌ No se pudo descargar cloudflared. Revisa tu conexión o descarga manual desde:"
-        echo "   https://github.com/cloudflare/cloudflared/releases"
-        exit 1
-    fi
-
-    sudo dpkg -i "$TEMP_DEB" || {
-        echo "❌ Error al instalar el paquete .deb"
-        exit 1
-    }
-
-    rm "$TEMP_DEB"
     echo "✅ cloudflared instalado correctamente."
 fi
 
-# 1. Autenticación (verifica cert.pem)
+# 2. Autenticación (verifica cert.pem)
 CERT_FILE="$HOME/.cloudflared/cert.pem"
 if [ -f "$CERT_FILE" ]; then
     echo "⚠️ Ya existe un archivo de autenticación: $CERT_FILE"
@@ -72,7 +79,7 @@ else
     cloudflared tunnel login
 fi
 
-# 2. Pedir datos
+# 3. Pedir datos
 read -p "Nombre del túnel (ej: mi-tunel): " TUNNEL_NAME
 TUNNEL_NAME=${TUNNEL_NAME// /-}
 
@@ -80,7 +87,7 @@ read -p "Dominio completo a usar (ej: ssh.mi-dominio.com): " HOSTNAME
 read -p "Puerto SSH local (default 22): " SSH_PORT
 SSH_PORT=${SSH_PORT:-22}
 
-# 3. Crear el túnel y manejar errores
+# 4. Crear el túnel y manejar errores
 echo "[*] Creando túnel: $TUNNEL_NAME..."
 if ! OUTPUT=$(cloudflared tunnel create "$TUNNEL_NAME" 2>&1); then
     if echo "$OUTPUT" | grep -q "tunnel with name already exists"; then
@@ -98,7 +105,7 @@ if ! OUTPUT=$(cloudflared tunnel create "$TUNNEL_NAME" 2>&1); then
     fi
 fi
 
-# 4. Detectar el archivo .json más reciente
+# 5. Detectar el archivo .json más reciente
 echo "[*] Detectando archivo de credenciales..."
 JSON_FILE=$(find ~/.cloudflared -maxdepth 1 -type f -name '*.json' -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)
 
@@ -111,7 +118,7 @@ TUNNEL_ID=$(jq -r .TunnelID "$JSON_FILE")
 echo "[*] Tunnel ID: $TUNNEL_ID"
 echo "[*] Archivo de credenciales: $JSON_FILE"
 
-# 5. Crear archivo config.yml
+# 6. Crear archivo config.yml
 CONFIG_PATH="$HOME/.cloudflared/config.yml"
 echo "[*] Creando archivo de configuración en $CONFIG_PATH..."
 
@@ -125,7 +132,7 @@ ingress:
   - service: http_status:404
 EOF
 
-# 6. Crear servicio systemd
+# 7. Crear servicio systemd
 SERVICE_NAME="cloudflared@$TUNNEL_NAME.service"
 echo "[*] Creando servicio systemd: $SERVICE_NAME"
 
@@ -137,7 +144,7 @@ After=network.target
 [Service]
 TimeoutStartSec=0
 Type=simple
-ExecStart=/usr/bin/cloudflared tunnel --config $CONFIG_PATH run
+ExecStart=/usr/local/bin/cloudflared tunnel --config $CONFIG_PATH run
 Restart=on-failure
 User=$USER
 
@@ -145,14 +152,14 @@ User=$USER
 WantedBy=multi-user.target
 EOF
 
-# 7. Activar el servicio
+# 8. Activar el servicio
 echo "[*] Recargando systemd y habilitando servicio..."
 sudo systemctl daemon-reexec
 sudo systemctl daemon-reload
 sudo systemctl enable $SERVICE_NAME
 sudo systemctl start $SERVICE_NAME
 
-# 8. Final
+# 9. Final
 echo ""
 echo "✅ Túnel creado y ejecutándose como servicio."
 echo "🌐 Recuerda crear un registro DNS CNAME en Cloudflare:"
