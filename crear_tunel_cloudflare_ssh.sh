@@ -69,14 +69,35 @@ if [ -f "$CERT_FILE" ]; then
         BACKUP_NAME="$CERT_FILE.backup.$(date +%s)"
         echo "[*] Moviendo $CERT_FILE a $BACKUP_NAME"
         mv "$CERT_FILE" "$BACKUP_NAME"
-        echo "[*] Ejecutando cloudflared tunnel login con QR..."
-        cloudflared tunnel login --qr
     else
         echo "[*] Usando el archivo existente."
     fi
-else
-    echo "[*] Ejecutando cloudflared tunnel login con QR..."
-    cloudflared tunnel login --qr
+fi
+
+if [ ! -f "$CERT_FILE" ]; then
+    echo "[*] Ejecutando cloudflared tunnel login..."
+    TMP_LOG=$(mktemp)
+
+    cloudflared tunnel login 2>&1 | tee "$TMP_LOG"
+    LOGIN_URL=$(grep -o 'https://[^ ]*' "$TMP_LOG" | head -n 1)
+
+    if [ -n "$LOGIN_URL" ]; then
+        echo "[*] URL de autenticación detectada:"
+        echo "$LOGIN_URL"
+
+        if command -v qrencode &>/dev/null; then
+            echo "[*] Mostrando QR para autenticación:"
+            qrencode -t ANSIUTF8 "$LOGIN_URL"
+        else
+            echo "(Instala qrencode para ver un QR directamente: sudo apt install -y qrencode)"
+        fi
+    else
+        echo "❌ No se detectó ninguna URL de login. Verifica manualmente."
+        cat "$TMP_LOG"
+        exit 1
+    fi
+
+    rm -f "$TMP_LOG"
 fi
 
 # 3. Pedir datos
@@ -91,11 +112,10 @@ SSH_PORT=${SSH_PORT:-22}
 echo "[*] Creando túnel: $TUNNEL_NAME..."
 if ! OUTPUT=$(cloudflared tunnel create "$TUNNEL_NAME" 2>&1); then
     if echo "$OUTPUT" | grep -q "tunnel with name already exists"; then
-        echo "❌ Error: Ya existe un túnel con el nombre '$TUNNEL_NAME' en tu cuenta de Cloudflare."
+        echo "❌ Error: Ya existe un túnel con el nombre '$TUNNEL_NAME'."
         echo ""
-        echo "ℹ️  Para eliminarlo manualmente, ejecuta:"
-        echo "    cloudflared tunnel delete \"$TUNNEL_NAME\""
-        echo ""
+        echo "ℹ️ Para eliminarlo manualmente, ejecuta:"
+        echo "   cloudflared tunnel delete \"$TUNNEL_NAME\""
         echo "Luego vuelve a ejecutar este script."
         exit 1
     else
@@ -105,12 +125,12 @@ if ! OUTPUT=$(cloudflared tunnel create "$TUNNEL_NAME" 2>&1); then
     fi
 fi
 
-# 5. Detectar el archivo .json más reciente
-echo "[*] Detectando archivo de credenciales..."
+# 5. Detectar archivo .json más reciente
+echo "[*] Buscando archivo de credenciales..."
 JSON_FILE=$(find ~/.cloudflared -maxdepth 1 -type f -name '*.json' -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)
 
 if [ ! -f "$JSON_FILE" ]; then
-    echo "❌ No se encontró el archivo de credenciales JSON. Abortando."
+    echo "❌ No se encontró archivo de credenciales JSON. Abortando."
     exit 1
 fi
 
@@ -120,7 +140,7 @@ echo "[*] Archivo de credenciales: $JSON_FILE"
 
 # 6. Crear archivo config.yml
 CONFIG_PATH="$HOME/.cloudflared/config.yml"
-echo "[*] Creando archivo de configuración en $CONFIG_PATH..."
+echo "[*] Generando configuración en $CONFIG_PATH..."
 
 cat <<EOF > "$CONFIG_PATH"
 tunnel: $TUNNEL_ID
@@ -134,7 +154,7 @@ EOF
 
 # 7. Crear servicio systemd
 SERVICE_NAME="cloudflared@$TUNNEL_NAME.service"
-echo "[*] Creando servicio systemd: $SERVICE_NAME"
+echo "[*] Configurando servicio systemd: $SERVICE_NAME"
 
 sudo tee /etc/systemd/system/$SERVICE_NAME > /dev/null <<EOF
 [Unit]
@@ -153,7 +173,7 @@ WantedBy=multi-user.target
 EOF
 
 # 8. Activar el servicio
-echo "[*] Recargando systemd y habilitando servicio..."
+echo "[*] Activando y lanzando servicio..."
 sudo systemctl daemon-reexec
 sudo systemctl daemon-reload
 sudo systemctl enable $SERVICE_NAME
