@@ -17,12 +17,40 @@ for cmd in "${DEPENDENCIAS[@]}"; do
     fi
 done
 
-# cloudflared se instala más abajo si falta
+# Validar arquitectura antes de instalar cloudflared
 if ! command -v cloudflared &>/dev/null; then
-    echo "[+] Instalando cloudflared..."
-    wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-    sudo dpkg -i cloudflared-linux-amd64.deb
-    rm cloudflared-linux-amd64.deb
+    echo "[+] Instalando cloudflared (Linux amd64)..."
+
+    ARCH=$(uname -m)
+    OS=$(uname -s)
+
+    if [[ "$OS" != "Linux" ]]; then
+        echo "❌ Este script está diseñado solo para sistemas Linux."
+        exit 1
+    fi
+
+    if [[ "$ARCH" != "x86_64" ]]; then
+        echo "❌ Este instalador solo soporta arquitectura amd64 (x86_64)."
+        echo "    Tu arquitectura detectada es: $ARCH"
+        exit 1
+    fi
+
+    TEMP_DEB="cloudflared-linux-amd64.deb"
+    wget -q --show-progress https://github.com/cloudflare/cloudflared/releases/latest/download/$TEMP_DEB
+
+    if [ ! -f "$TEMP_DEB" ]; then
+        echo "❌ No se pudo descargar cloudflared. Revisa tu conexión o descarga manual desde:"
+        echo "   https://github.com/cloudflare/cloudflared/releases"
+        exit 1
+    fi
+
+    sudo dpkg -i "$TEMP_DEB" || {
+        echo "❌ Error al instalar el paquete .deb"
+        exit 1
+    }
+
+    rm "$TEMP_DEB"
+    echo "✅ cloudflared instalado correctamente."
 fi
 
 # 1. Autenticación (verifica cert.pem)
