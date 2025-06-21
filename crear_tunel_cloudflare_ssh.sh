@@ -74,30 +74,28 @@ if [ -f "$CERT_FILE" ]; then
     fi
 fi
 
+# 2.1 Si no hay archivo, iniciar login y mostrar QR en tiempo real
 if [ ! -f "$CERT_FILE" ]; then
     echo "[*] Ejecutando cloudflared tunnel login..."
-    TMP_LOG=$(mktemp)
 
-    cloudflared tunnel login 2>&1 | tee "$TMP_LOG"
-    LOGIN_URL=$(grep -o 'https://[^ ]*' "$TMP_LOG" | head -n 1)
+    stdbuf -oL cloudflared tunnel login 2>&1 | while IFS= read -r line; do
+        echo "$line"
+        if [[ "$line" =~ https:\/\/dash\.cloudflare\.com\/argotunnel\?aud=.* ]]; then
+            LOGIN_URL=$(echo "$line" | grep -o 'https://[^ ]*')
+            echo ""
+            echo "[*] URL de autenticación detectada:"
+            echo "$LOGIN_URL"
+            echo ""
 
-    if [ -n "$LOGIN_URL" ]; then
-        echo "[*] URL de autenticación detectada:"
-        echo "$LOGIN_URL"
-
-        if command -v qrencode &>/dev/null; then
-            echo "[*] Mostrando QR para autenticación:"
-            qrencode -t ANSIUTF8 "$LOGIN_URL"
-        else
-            echo "(⚠️ No se encontró 'qrencode'. Puedes instalarlo con: sudo apt install -y qrencode)"
+            if command -v qrencode &>/dev/null; then
+                echo "[*] Mostrando QR para autenticación:"
+                qrencode -t ANSIUTF8 "$LOGIN_URL"
+                echo ""
+            else
+                echo "(⚠️ No se encontró 'qrencode'. Puedes instalarlo con: sudo apt install -y qrencode)"
+            fi
         fi
-    else
-        echo "❌ No se detectó ninguna URL de login. Verifica manualmente."
-        cat "$TMP_LOG"
-        exit 1
-    fi
-
-    rm -f "$TMP_LOG"
+    done
 fi
 
 # 3. Pedir datos
