@@ -89,7 +89,7 @@ if [ ! -f "$CERT_FILE" ]; then
             echo "[*] Mostrando QR para autenticación:"
             qrencode -t ANSIUTF8 "$LOGIN_URL"
         else
-            echo "(Instala qrencode para ver un QR directamente: sudo apt install -y qrencode)"
+            echo "(⚠️ No se encontró 'qrencode'. Puedes instalarlo con: sudo apt install -y qrencode)"
         fi
     else
         echo "❌ No se detectó ninguna URL de login. Verifica manualmente."
